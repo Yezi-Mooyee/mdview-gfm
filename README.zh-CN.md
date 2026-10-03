@@ -2,6 +2,12 @@
 
 [English](README.md) · **简体中文**
 
+> [!NOTE]
+> **本项目 100% 由 AI 生成。** 每一行代码、每一条提交信息和本文档都由 **DeepSeek Harness**
+> 驱动 **DeepSeek V4.1 Flash** 模型产出；人类维护者负责定方向和审阅结果。提交都带有
+> `Co-Authored-By: dsh <dsh@users.noreply.github.com>` 和
+> `Generated-By: dsh (DeepSeek Harness)` 两个 trailer。
+
 一个用 **GitHub 官方渲染器**的轻量 Markdown 查看器。
 
 > 程序本身叫 **mdview**——窗口标题和命令行里用的都是这个名字。仓库名叫 `mdview-gfm` 只是为了更容易被搜到。
@@ -157,17 +163,6 @@ CLI 完全不需要 WebView2——它只是写一个 HTML 文件然后请浏览�
 | `github-markdown-dark.css` | 强制深色——同样是硬编码配色 |
 | `test.md` | 用于测试的 GFM 特性样例 |
 | `THIRD-PARTY-NOTICES.md` | 再分发文件与运行依赖的许可证 |
-
-## 由 AI 生成
-
-**本项目 100% 由 AI 生成。** 每一行代码、每一条提交信息和本文档都由 **DeepSeek Harness** 驱动 **DeepSeek V4.1 Flash** 模型产出；人类维护者负责定方向和审阅结果。
-
-因此提交都带有这些 trailer：
-
-```
-Co-Authored-By: dsh <dsh@users.noreply.github.com>
-Generated-By: dsh (DeepSeek Harness)
-```
 
 ## 许可证
 
