@@ -5,8 +5,8 @@
 > [!NOTE]
 > **本项目 100% 由 AI 生成。** 每一行代码、每一条提交信息和本文档都由 **DeepSeek Harness**
 > 驱动 **DeepSeek V4.1 Flash** 模型产出；人类维护者负责定方向和审阅结果。提交都带有
-> `Co-Authored-By: dsh <noreply@deepseek.com>` 和
-> `Generated-By: dsh (DeepSeek Harness)` 两个 trailer。
+> `Co-Authored-By: DeepSeek V4.1 Flash <noreply@deepseek.com>` 和
+> `Generated-By: dsh 0.1.7-rc.2` 两个 trailer。
 
 一个用 **GitHub 官方渲染器**的轻量 Markdown 查看器——原生窗口用来阅读，外加一个小巧的 CLI 把 Markdown 转成 HTML。
 
