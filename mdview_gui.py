@@ -396,14 +396,14 @@ window.mdview = (function () {
   // 页面里的链接一律不在 WebView 内导航，否则目标页面会把整个 GUI 顶掉且退不回来。
   // 页内锚点（#fn-1 这类）除外，那是文档内部的跳转。
   function interceptLink(e) {
-    // auxclick 同时覆盖中键和右键，这里只放行中键；右键要留给 WebView2 自己的
-    // 上下文菜单（复制链接地址之类），劫持掉反而碍事
-    if (e.type === "auxclick" && e.button !== 1) { return; }
     const link = e.target && e.target.closest ? e.target.closest("a[href]") : null;
     if (!link) { return; }
     const href = link.getAttribute("href") || "";
     if (href.startsWith("#")) { return; }
     e.preventDefault();
+    // 只有主键（左键）才真的打开。中键和右键都只吞掉默认行为——不吞的话 WebView2
+    // 可能自己开新窗口或导航过去；右键的上下文菜单不受 auxclick 影响，照常弹出。
+    if (e.type === "auxclick") { return; }
     const bridge = api();
     if (bridge) { bridge.open_link(link.href); }
   }
