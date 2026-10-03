@@ -1,8 +1,10 @@
-# mdview
+# mdview-gfm
 
 [English](README.md) · **简体中文**
 
 一个用 **GitHub 官方渲染器**的轻量 Markdown 查看器。
+
+> 程序本身叫 **mdview**——窗口标题和命令行里用的都是这个名字。仓库名叫 `mdview-gfm` 只是为了更容易被搜到。
 
 - **GUI** —— 原生窗口，不是浏览器标签页。带工具栏、最近文件、明暗主题、缩放、拖放打开。
 - **CLI** —— 一条命令把 Markdown 渲染成 HTML 丢给浏览器。

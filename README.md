@@ -1,8 +1,11 @@
-# mdview
+# mdview-gfm
 
 **English** · [简体中文](README.zh-CN.md)
 
 A featherweight Markdown viewer built on **GitHub's own renderer**.
+
+> The application itself is called **mdview** — that is the name in the window title
+> and on the command line. The repository is `mdview-gfm` only so it is easier to find.
 
 - **GUI** — a native window, not a browser tab. Toolbar, recent files, light/dark themes, zoom, drag & drop.
 - **CLI** — one command turns a Markdown file into HTML and hands it to your browser.
