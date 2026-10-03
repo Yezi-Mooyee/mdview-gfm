@@ -57,6 +57,8 @@ SHELL_PATH = Path(tempfile.gettempdir()) / "mdview" / "gui.html"
 
 SPI_GETWORKAREA = 0x0030
 DEFAULT_CONFIG: dict = {"theme": "auto", "zoom": 100, "recent": [], "last_dir": ""}
+# 历史栈上限：长时间浏览也不至于让栈无限涨下去
+MAX_HISTORY = 100
 
 # 窗口引用放在模块级：pywebview 会遍历 js_api 对象的公开属性，把它挂在
 # Api 实例上会让它顺着 window.native 一路递归下去，报一堆无关错误。
@@ -394,6 +396,9 @@ window.mdview = (function () {
   // 页面里的链接一律不在 WebView 内导航，否则目标页面会把整个 GUI 顶掉且退不回来。
   // 页内锚点（#fn-1 这类）除外，那是文档内部的跳转。
   function interceptLink(e) {
+    // auxclick 同时覆盖中键和右键，这里只放行中键；右键要留给 WebView2 自己的
+    // 上下文菜单（复制链接地址之类），劫持掉反而碍事
+    if (e.type === "auxclick" && e.button !== 1) { return; }
     const link = e.target && e.target.closest ? e.target.closest("a[href]") : null;
     if (!link) { return; }
     const href = link.getAttribute("href") || "";
@@ -526,6 +531,22 @@ class Api:
             f"{'true' if self._index < len(self._history) - 1 else 'false'});"
         )
 
+    def _push_history(self, entry: Path | None) -> None:
+        """把一页压入历史。
+
+        三件事：同一页不重复入栈（连点同一个文件不该堆一串）、从历史中间岔开时丢弃
+        后面那条分支、超过 MAX_HISTORY 就从头部截掉并同步挪动游标，避免栈无限增长。
+        """
+        if self._history[self._index] == entry:
+            return
+        del self._history[self._index + 1 :]
+        self._history.append(entry)
+        self._index = len(self._history) - 1
+        overflow = len(self._history) - MAX_HISTORY
+        if overflow > 0:
+            del self._history[:overflow]
+            self._index -= overflow
+
     def _remember(self, path: Path) -> None:
         """把文件记入最近列表并落盘。
 
@@ -570,10 +591,7 @@ class Api:
         self._set_title(path)
         self._remember(path)
         if record_history:
-            # 从历史中间打开新文件时，丢弃后面那条分支
-            del self._history[self._index + 1 :]
-            self._history.append(path)
-            self._index = len(self._history) - 1
+            self._push_history(path)
         self._push_nav()
         return True
 
