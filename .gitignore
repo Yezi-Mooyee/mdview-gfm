@@ -1,0 +1,14 @@
+# Python 字节码缓存
+__pycache__/
+*.py[cod]
+
+# 编辑器/系统杂物
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*~
+
+# 运行期产物：预览用的临时 HTML、日志等
+# （用户配置不在仓库内，存在 %APPDATA%\mdview\config.json）
+*.log
