@@ -313,6 +313,8 @@ window.mdview = (function () {
 
   function setRecent(items) {
     const box = $("recent-box"), list = $("recent-list");
+    // 打开文件后欢迎页已被文档内容取代，这两个元素不复存在，直接跳过
+    if (!box || !list) { return; }
     list.textContent = "";
     if (!items || !items.length) { box.hidden = true; return; }
     box.hidden = false;
@@ -373,7 +375,7 @@ window.mdview = (function () {
     reload() { const b = api(); if (b) { b.reload(); } },
     browser() { const b = api(); if (b) { b.open_in_browser(); } },
     openRecent(p) { const b = api(); if (b) { b.open_path(p); } },
-    clearRecent() { const b = api(); if (b) { b.clear_recent(); } },
+    clearRecent() { const b = api(); if (b) { b.clear_recent(); } setRecent([]); },
     zoom(delta) { applyZoom(state.zoom + delta); const b = api(); if (b) { b.set_zoom(state.zoom); } },
     resetZoom() { applyZoom(100); const b = api(); if (b) { b.set_zoom(100); } },
     theme(mode) { applyTheme(mode); const b = api(); if (b) { b.set_theme(mode); } },
@@ -416,21 +418,31 @@ class Api:
 
     # -- 内部工具 ---------------------------------------------------------- #
     def _push(self, script: str) -> None:
-        if _ACTIVE_WINDOW is not None:
+        """把脚本推给页面。页面侧报错不该拖垮 Python 侧，所以这里吞掉异常。"""
+        if _ACTIVE_WINDOW is None:
+            return
+        try:
             _ACTIVE_WINDOW.evaluate_js(script)
+        except Exception as exc:  # noqa: BLE001  JS 出错只记一笔，不中断 Python 流程
+            print(f"页面脚本执行失败：{exc}", file=sys.stderr)
 
     def _set_title(self, path: Path) -> None:
         if _ACTIVE_WINDOW is not None:
             _ACTIVE_WINDOW.title = f"{path.name} — mdview"
 
     def _remember(self, path: Path) -> None:
+        """把文件记入最近列表并落盘。
+
+        这里刻意不推送 UI 更新：本方法会在 initial_document() 内部被调用，而带返回值
+        的 js_api 方法里再调 evaluate_js，会干扰返回值回传前端，表现为「启动时带文件
+        参数却打不开」。最近列表只在欢迎页用到，前端拿 ready() 的返回值就够了。
+        """
         entry = str(path.resolve())  # 存绝对路径，否则最近列表会随工作目录失效
         recent = [p for p in self._config["recent"] if p != entry]
         recent.insert(0, entry)
         self._config["recent"] = recent[:12]
         self._config["last_dir"] = str(path.parent)
         save_config(self._config)
-        self._push(f"window.mdview.setRecent({core.to_js(self._config['recent'])});")
 
     def _document(self, path: Path) -> dict:
         return {
@@ -560,7 +572,6 @@ class Api:
     def clear_recent(self) -> None:
         self._config["recent"] = []
         save_config(self._config)
-        self._push("window.mdview.setRecent([]);")
 
 
 def main() -> int:
