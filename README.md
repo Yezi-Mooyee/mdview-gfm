@@ -15,7 +15,7 @@
 
 ## 快速开始
 
-双击 `mdview-gui.cmd` 启动窗口，也可以先把文件拖到它上面。
+双击 `mdview-gui.pyw` 启动窗口——`.pyw` 由 `pythonw` 执行，不会闪黑框；想从命令行启动就用 `mdview-gui.cmd`。
 
 命令行：
 
@@ -52,7 +52,8 @@
 | 文件 | 说明 |
 |:-----|:-----|
 | `mdview_gui.py` | GUI 主体（原生窗口 + 工具栏） |
-| `mdview-gui.cmd` | GUI 入口，用 `pythonw` 启动所以没有黑框 |
+| `mdview-gui.pyw` | GUI 双击入口，`.pyw` 不创建控制台所以不闪窗 |
+| `mdview-gui.cmd` | 同一入口的命令行版本（会先起一个 cmd 宿主窗口） |
 | `mdview.py` | CLI 入口 |
 | `mdview.cmd` | CLI 入口的 cmd 包装 |
 | `mdview_core.py` | 渲染核心，GUI 与 CLI 共用，保证两边输出一致 |
