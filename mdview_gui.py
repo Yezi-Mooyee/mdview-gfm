@@ -200,7 +200,7 @@ SHELL = r"""<!DOCTYPE html>
     border: 1px solid var(--btn-border); border-radius: 6px;
     cursor: pointer; white-space: nowrap;
   }
-  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:hover:not(:disabled):not(.active) { border-color: var(--accent); color: var(--accent); }
   button:disabled { opacity: .5; cursor: default; }
   button.active { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
   button.icon { min-width: 36px; padding: 0 8px; }
