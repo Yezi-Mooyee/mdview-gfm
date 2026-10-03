@@ -240,6 +240,11 @@ SHELL = r"""<!DOCTYPE html>
 <body>
 <header id="bar">
   <div class="group">
+    <button class="icon" id="btn-back" onclick="mdview.back()" title="后退 (Alt+←)" disabled>←</button>
+    <button class="icon" id="btn-forward" onclick="mdview.forward()" title="前进 (Alt+→)" disabled>→</button>
+    <button onclick="mdview.home()" title="回到主页 (Alt+Home)">主页</button>
+  </div>
+  <div class="group">
     <button onclick="mdview.open()" title="Ctrl+O">打开…</button>
     <button class="icon" onclick="mdview.reload()" title="重新读取文件 (F5)">刷新</button>
     <button onclick="mdview.browser()" title="在系统默认浏览器里打开 (Ctrl+B)">浏览器</button>
@@ -281,7 +286,9 @@ SHELL = r"""<!DOCTYPE html>
 const $ = (id) => document.getElementById(id);
 
 window.mdview = (function () {
-  const state = { theme: "auto", zoom: 100 };
+  const state = { theme: "auto", zoom: 100, recent: [] };
+  // 欢迎页的原始内容，回主页时照原样恢复
+  const WELCOME_HTML = $("doc").innerHTML;
 
   function applyTheme(mode) {
     state.theme = mode;
@@ -318,6 +325,7 @@ window.mdview = (function () {
   }
 
   function setRecent(items) {
+    state.recent = items || [];
     const box = $("recent-box"), list = $("recent-list");
     // 打开文件后欢迎页已被文档内容取代，这两个元素不复存在，直接跳过
     if (!box || !list) { return; }
@@ -334,6 +342,21 @@ window.mdview = (function () {
     });
   }
 
+  function showWelcome() {
+    $("doc").innerHTML = WELCOME_HTML;
+    $("file-name").textContent = "未打开文件";
+    $("file-dir").textContent = "";
+    $("file-dir").title = "";
+    document.title = "mdview";
+    $("scroll").scrollTop = 0;
+    setRecent(state.recent);
+  }
+
+  function setNav(canBack, canForward) {
+    $("btn-back").disabled = !canBack;
+    $("btn-forward").disabled = !canForward;
+  }
+
   function api() { return (window.pywebview && window.pywebview.api) || null; }
 
   function bind() {
@@ -345,7 +368,10 @@ window.mdview = (function () {
       applyZoom(cfg.zoom);
       setRecent(cfg.recent);
       return bridge.initial_document();
-    }).then((doc) => { if (doc) { setDocument(doc); } })
+    }).then((doc) => {
+      if (doc) { setDocument(doc); }
+      return bridge.nav_state();
+    }).then((nav) => { if (nav) { setNav(nav[0], nav[1]); } })
       .catch((err) => { console.error(err); });
   }
 
@@ -359,6 +385,9 @@ window.mdview = (function () {
     else if (e.ctrlKey && (e.key === "=" || e.key === "+")) { e.preventDefault(); mdview.zoom(10); }
     else if (e.ctrlKey && e.key === "-") { e.preventDefault(); mdview.zoom(-10); }
     else if (e.ctrlKey && e.key === "0") { e.preventDefault(); mdview.resetZoom(); }
+    else if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); mdview.back(); }
+    else if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); mdview.forward(); }
+    else if (e.altKey && e.key === "Home") { e.preventDefault(); mdview.home(); }
   });
 
   // 页面里的链接一律不在 WebView 内导航，否则目标页面会把整个 GUI 顶掉且退不回来。
@@ -397,7 +426,10 @@ window.mdview = (function () {
     zoom(delta) { applyZoom(state.zoom + delta); const b = api(); if (b) { b.set_zoom(state.zoom); } },
     resetZoom() { applyZoom(100); const b = api(); if (b) { b.set_zoom(100); } },
     theme(mode) { applyTheme(mode); const b = api(); if (b) { b.set_theme(mode); } },
-    setDocument, setRecent, applyTheme, applyZoom,
+    back() { const b = api(); if (b) { b.go_back(); } },
+    forward() { const b = api(); if (b) { b.go_forward(); } },
+    home() { const b = api(); if (b) { b.go_home(); } },
+    setDocument, setRecent, setNav, showWelcome, applyTheme, applyZoom,
   };
 })();
 </script>
@@ -433,6 +465,9 @@ class Api:
         self._config = load_config()
         self._initial = initial
         self._current: Path | None = None
+        # 导航历史：栈底的 None 就是欢迎页，于是「主页」等价于跳到第一项
+        self._history: list[Path | None] = [None]
+        self._index = 0
 
     # -- 内部工具 ---------------------------------------------------------- #
     def _push(self, script: str) -> None:
@@ -444,9 +479,17 @@ class Api:
         except Exception as exc:  # noqa: BLE001  JS 出错只记一笔，不中断 Python 流程
             print(f"页面脚本执行失败：{exc}", file=sys.stderr)
 
-    def _set_title(self, path: Path) -> None:
+    def _set_title(self, path: Path | None) -> None:
         if _ACTIVE_WINDOW is not None:
-            _ACTIVE_WINDOW.title = f"{path.name} — mdview"
+            _ACTIVE_WINDOW.title = f"{path.name} — mdview" if path is not None else "mdview"
+
+    def _push_nav(self) -> None:
+        """把前进/后退按钮的可用状态推给前端。"""
+        self._push(
+            "window.mdview.setNav("
+            f"{'true' if self._index > 0 else 'false'}, "
+            f"{'true' if self._index < len(self._history) - 1 else 'false'});"
+        )
 
     def _remember(self, path: Path) -> None:
         """把文件记入最近列表并落盘。
@@ -471,7 +514,9 @@ class Api:
         }
 
     # -- 加载 -------------------------------------------------------------- #
-    def load_path(self, path: Path, keep_scroll: bool = False) -> bool:
+    def load_path(
+        self, path: Path, keep_scroll: bool = False, record_history: bool = True
+    ) -> bool:
         path = Path(path).expanduser().resolve()
         if not path.is_file():
             print(f"找不到文件：{path}", file=sys.stderr)
@@ -489,6 +534,12 @@ class Api:
         self._current = path
         self._set_title(path)
         self._remember(path)
+        if record_history:
+            # 从历史中间打开新文件时，丢弃后面那条分支
+            del self._history[self._index + 1 :]
+            self._history.append(path)
+            self._index = len(self._history) - 1
+        self._push_nav()
         return True
 
     # -- 供前端调用的接口 --------------------------------------------------- #
@@ -498,6 +549,14 @@ class Api:
             "zoom": self._config["zoom"],
             "recent": self._config["recent"],
         }
+
+    def nav_state(self) -> list[bool]:
+        """前端启动完成后来问一次导航按钮状态。
+
+        初始文档是在 initial_document() 里入栈的，而那个方法带返回值，不能在里面推送
+        （会干扰返回值回传），所以这里让前端自己来取。
+        """
+        return [self._index > 0, self._index < len(self._history) - 1]
 
     def initial_document(self) -> dict | None:
         if self._initial is None or not self._initial.is_file():
@@ -509,6 +568,8 @@ class Api:
         self._current = self._initial
         self._set_title(self._initial)
         self._remember(self._initial)
+        self._history.append(self._initial)
+        self._index = len(self._history) - 1
         return document
 
     def open_file(self) -> None:
@@ -558,6 +619,31 @@ class Api:
         if self._current is not None:
             # 刷新要停在原处，否则读长文档时每次刷新都被弹回顶部
             self.load_path(self._current, keep_scroll=True)
+
+    def _show_entry(self) -> None:
+        entry = self._history[self._index]
+        if entry is None:
+            self._current = None
+            self._set_title(None)
+            self._push("window.mdview.showWelcome();")
+        else:
+            self.load_path(entry, record_history=False)
+        self._push_nav()
+
+    def go_back(self) -> None:
+        if self._index > 0:
+            self._index -= 1
+            self._show_entry()
+
+    def go_forward(self) -> None:
+        if self._index < len(self._history) - 1:
+            self._index += 1
+            self._show_entry()
+
+    def go_home(self) -> None:
+        if self._index != 0:
+            self._index = 0
+            self._show_entry()
 
     def open_in_browser(self) -> None:
         if self._current is None:
