@@ -302,14 +302,19 @@ window.mdview = (function () {
     $("zoom-label").textContent = state.zoom + "%";
   }
 
-  function setDocument(d) {
+  function setDocument(d, keepScroll) {
+    const scroller = $("scroll");
+    // 先按比例记住当前位置，替换内容后再换算回去，这样刷新不会跳回顶部
+    const span = scroller.scrollHeight - scroller.clientHeight;
+    const ratio = span > 0 ? scroller.scrollTop / span : 0;
     if (d.base) { $("base").href = d.base; }
     $("doc").innerHTML = d.html;
     $("file-name").textContent = d.title || "未打开文件";
     $("file-dir").textContent = d.dir || "";
     $("file-dir").title = d.dir || "";
     document.title = (d.title || "mdview") + " — mdview";
-    $("scroll").scrollTop = 0;
+    const newSpan = scroller.scrollHeight - scroller.clientHeight;
+    scroller.scrollTop = keepScroll && newSpan > 0 ? ratio * newSpan : 0;
   }
 
   function setRecent(items) {
@@ -466,7 +471,7 @@ class Api:
         }
 
     # -- 加载 -------------------------------------------------------------- #
-    def load_path(self, path: Path) -> bool:
+    def load_path(self, path: Path, keep_scroll: bool = False) -> bool:
         path = Path(path).expanduser().resolve()
         if not path.is_file():
             print(f"找不到文件：{path}", file=sys.stderr)
@@ -477,7 +482,10 @@ class Api:
             print(f"读取失败：{exc}", file=sys.stderr)
             return False
 
-        self._push(f"window.mdview.setDocument({core.to_js(document)});")
+        self._push(
+            f"window.mdview.setDocument({core.to_js(document)}, "
+            f"{'true' if keep_scroll else 'false'});"
+        )
         self._current = path
         self._set_title(path)
         self._remember(path)
@@ -548,7 +556,8 @@ class Api:
 
     def reload(self) -> None:
         if self._current is not None:
-            self.load_path(self._current)
+            # 刷新要停在原处，否则读长文档时每次刷新都被弹回顶部
+            self.load_path(self._current, keep_scroll=True)
 
     def open_in_browser(self) -> None:
         if self._current is None:
