@@ -222,6 +222,14 @@ __MARKDOWN_CSS__
   #zoom-label { font-size: 13px; color: var(--muted); min-width: 42px; text-align: center; }
 
   #scroll { flex: 1 1 auto; overflow: auto; }
+  #statusbar {
+    flex: 0 0 auto; height: 22px; padding: 0 12px;
+    font-size: 12px; line-height: 22px;
+    color: var(--muted); background: var(--bar-bg);
+    border-top: 1px solid var(--bar-border);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    user-select: text;
+  }
   #doc {
     box-sizing: border-box;
     zoom: var(--zoom);
@@ -284,6 +292,8 @@ __MARKDOWN_CSS__
     </div>
   </article>
 </main>
+
+<footer id="statusbar"><span id="status-text"></span></footer>
 
 <script>
 "use strict";
@@ -409,6 +419,28 @@ window.mdview = (function () {
   }
   document.addEventListener("click", interceptLink);
   document.addEventListener("auxclick", interceptLink);
+
+  // 悬停链接时把目标地址显示到底部状态栏，和浏览器的习惯一致
+  function linkOf(target) {
+    return target && target.closest ? target.closest("a[href]") : null;
+  }
+  function showLink(href) {
+    const text = $("status-text");
+    if (!text) { return; }
+    if (!href) { text.textContent = ""; return; }
+    // file:///C:/x/y.md 显示成本地路径更好读
+    text.textContent = href.startsWith("file:///")
+      ? decodeURIComponent(href.slice(8)).replace(/\//g, "\\")
+      : href;
+  }
+  document.addEventListener("mouseover", (e) => {
+    const link = linkOf(e.target);
+    showLink(link ? link.href : null);
+  });
+  document.addEventListener("mouseout", (e) => {
+    const link = linkOf(e.relatedTarget);
+    showLink(link ? link.href : null);
+  });
 
   // 拖文件进来：外部拖放被 WebView2 自己吃掉了，父窗体既收不到也没法让它透传，
   // 只能让页面把 File 对象交给宿主，由宿主从 AdditionalObjects 里取出真实路径。
