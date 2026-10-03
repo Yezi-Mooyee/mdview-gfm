@@ -149,9 +149,10 @@ SHELL = r"""<!DOCTYPE html>
 <meta name="color-scheme" content="light dark">
 <title>mdview</title>
 <base id="base" href="__BASE__">
-<link id="css-auto" rel="stylesheet" href="__CSS_AUTO__">
-<link id="css-light" rel="stylesheet" href="__CSS_LIGHT__" disabled>
-<link id="css-dark" rel="stylesheet" href="__CSS_DARK__" disabled>
+<style>
+/* GitHub 官方 Markdown 样式，三个变体已合并成一份，见 build_markdown_css() */
+__MARKDOWN_CSS__
+</style>
 <style>
   :root {
     --page-bg: #ffffff; --bar-bg: #f6f8fa; --bar-fg: #1f2328;
@@ -159,8 +160,9 @@ SHELL = r"""<!DOCTYPE html>
     --muted: #59636e; --accent: #0969da; --accent-fg: #ffffff;
     --content-width: 1012px; --zoom: 1;
   }
+  /* 系统深色时生效，但「强制浅色」要能压过它 */
   @media (prefers-color-scheme: dark) {
-    :root {
+    html:not([data-forced-theme="light"]) {
       --page-bg: #0d1117; --bar-bg: #151b23; --bar-fg: #f0f6fc;
       --bar-border: #3d444d; --btn-bg: #212830; --btn-border: #3d444d;
       --muted: #9198a1; --accent: #4493f8; --accent-fg: #ffffff;
@@ -292,12 +294,11 @@ window.mdview = (function () {
 
   function applyTheme(mode) {
     state.theme = mode;
+    // 只改属性、不碰样式表：三份官方样式已经合并成一份，所以不存在「旧的失效、
+    // 新的还在加载」的空窗，滚动位置和排版也就不会跟着跳
     const root = document.documentElement;
     if (mode === "auto") { root.removeAttribute("data-forced-theme"); }
     else { root.setAttribute("data-forced-theme", mode); }
-    $("css-auto").disabled = mode !== "auto";
-    $("css-light").disabled = mode !== "light";
-    $("css-dark").disabled = mode !== "dark";
     document.querySelectorAll("[data-theme-btn]").forEach((b) => {
       b.classList.toggle("active", b.dataset.themeBtn === mode);
     });
@@ -438,12 +439,46 @@ window.mdview = (function () {
 """
 
 
+def _first_rule_body(css: str) -> str:
+    """取出样式表第一段规则的声明体（就是那一堆 --var 定义）。"""
+    start = css.index("{")
+    depth = 0
+    for i in range(start, len(css)):
+        if css[i] == "{":
+            depth += 1
+        elif css[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return css[start + 1 : i]
+    raise ValueError("样式表括号不配对")
+
+
+def build_markdown_css() -> str:
+    """把三份官方样式表合成一份，供主题切换用。
+
+    github-markdown-css 只给了三个独立文件（自动 / 强制浅 / 强制深）。靠切换 <link>
+    换主题会有一个「旧样式已经失效、新样式还在加载」的空窗，页面会在这个瞬间重排——
+    表现就是切主题时滚动位置和缩放进度一起跳。合并成一份之后，切主题只是改 html 上的
+    data-forced-theme 属性，样式表自始至终不动，也就没有空窗。
+    """
+    page_css = (APP_DIR / "github-markdown-light.css").read_text(encoding="utf-8")
+    dark_vars = _first_rule_body(
+        (APP_DIR / "github-markdown-dark.css").read_text(encoding="utf-8")
+    )
+    return (
+        page_css
+        + "\n/* ---- 以下由 mdview 追加，用于按属性切换主题 ---- */\n"
+        + f'html[data-forced-theme="dark"] .markdown-body {{{dark_vars}}}\n'
+        + "@media (prefers-color-scheme: dark) {\n"
+        + f'  html:not([data-forced-theme="light"]) .markdown-body {{{dark_vars}}}\n'
+        + "}\n"
+    )
+
+
 def build_shell(base_uri: str) -> str:
     replacements = {
         "__BASE__": base_uri,
-        "__CSS_AUTO__": (APP_DIR / "github-markdown.css").as_uri(),
-        "__CSS_LIGHT__": (APP_DIR / "github-markdown-light.css").as_uri(),
-        "__CSS_DARK__": (APP_DIR / "github-markdown-dark.css").as_uri(),
+        "__MARKDOWN_CSS__": build_markdown_css(),
     }
     shell = SHELL
     for key, value in replacements.items():

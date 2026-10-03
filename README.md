@@ -76,9 +76,9 @@ pythonnet/CLR + 建窗口），其余 6–20 秒都花在 WebView2 上，并且�
 | `mdview.py` | CLI 入口 |
 | `mdview.cmd` | CLI 入口的 cmd 包装 |
 | `mdview_core.py` | 渲染核心，GUI 与 CLI 共用，保证两边输出一致 |
-| `github-markdown.css` | GitHub 官方样式表，跟随系统自动明暗 |
-| `github-markdown-light.css` | 强制浅色，供主题按钮使用 |
-| `github-markdown-dark.css` | 强制深色，供主题按钮使用 |
+| `github-markdown.css` | GitHub 官方样式表（随系统自动明暗），CLI 版用它 |
+| `github-markdown-light.css` | 强制浅色，GUI 合并主题时取它的组件规则与浅色变量 |
+| `github-markdown-dark.css` | 强制深色，GUI 合并主题时只取它的变量块 |
 | `test.md` | GFM 特性自测样例 |
 
 ## CLI 用法
