@@ -345,14 +345,14 @@ window.mdview = (function () {
     });
   }
 
-  function showWelcome() {
+  function showWelcome(items) {
     $("doc").innerHTML = WELCOME_HTML;
     $("file-name").textContent = "未打开文件";
     $("file-dir").textContent = "";
     $("file-dir").title = "";
     document.title = "mdview";
     $("scroll").scrollTop = 0;
-    setRecent(state.recent);
+    setRecent(items || state.recent);
   }
 
   function setNav(canBack, canForward) {
@@ -505,9 +505,13 @@ class Api:
         self._config = load_config()
         self._initial = initial
         self._current: Path | None = None
-        # 导航历史：栈底的 None 就是欢迎页，于是「主页」等价于跳到第一项
+        # 历史栈里的 None 代表主页
         self._history: list[Path | None] = [None]
         self._index = 0
+        # 启动时先剔掉已经不存在的最近项，免得列表里留点不开的死链
+        self._config["recent"] = [
+            p for p in self._config["recent"] if Path(p).is_file()
+        ]
 
     # -- 内部工具 ---------------------------------------------------------- #
     def _push(self, script: str) -> None:
@@ -555,7 +559,9 @@ class Api:
         参数却打不开」。最近列表只在欢迎页用到，前端拿 ready() 的返回值就够了。
         """
         entry = str(path.resolve())  # 存绝对路径，否则最近列表会随工作目录失效
-        recent = [p for p in self._config["recent"] if p != entry]
+        # 落盘前重读一次：多个实例同时开着，各写各的会把对方刚记的条目吞掉
+        stored = load_config()
+        recent = [p for p in stored.get("recent", []) if p != entry]
         recent.insert(0, entry)
         self._config["recent"] = recent[:12]
         self._config["last_dir"] = str(path.parent)
@@ -673,12 +679,27 @@ class Api:
             # 刷新要停在原处，否则读长文档时每次刷新都被弹回顶部
             self.load_path(self._current, keep_scroll=True)
 
+    def _reload_recent(self) -> None:
+        """进主页时重读最近列表。
+
+        同时开着两个实例是常态，所以每次都从磁盘取最新的；顺手剔掉已经不存在的路径，
+        免得列表里留下点不开的死项。
+        """
+        stored = load_config()
+        self._config["recent"] = [
+            p for p in stored.get("recent", []) if Path(p).is_file()
+        ]
+        self._config["last_dir"] = stored.get("last_dir") or self._config.get("last_dir", "")
+
     def _show_entry(self) -> None:
         entry = self._history[self._index]
         if entry is None:
             self._current = None
             self._set_title(None)
-            self._push("window.mdview.showWelcome();")
+            self._reload_recent()
+            self._push(
+                f"window.mdview.showWelcome({core.to_js(self._config['recent'])});"
+            )
         else:
             self.load_path(entry, record_history=False)
         self._push_nav()
@@ -694,10 +715,10 @@ class Api:
             self._show_entry()
 
     def go_home(self) -> None:
-        # 主页按新的一页入栈，而不是退回栈底，这样「后退」还能回到刚才那份文档
-        if self._history[self._index] is None:
-            return  # 已经在主页，不必再叠一层
-        self._push_history(None)
+        # 主页按新的一页入栈，这样「后退」还能回到刚才那份文档；已经在主页时不再叠层，
+        # 但仍然走一遍 _show_entry()，好把最近列表重新刷一次
+        if self._history[self._index] is not None:
+            self._push_history(None)
         self._show_entry()
 
     def open_in_browser(self) -> None:
