@@ -369,6 +369,11 @@ window.mdview = (function () {
   document.addEventListener("click", interceptLink);
   document.addEventListener("auxclick", interceptLink);
 
+  // 兜底：万一 WebView2 还在处理外部拖放，至少别让它把页面导航走
+  ["dragover", "drop"].forEach((type) => {
+    window.addEventListener(type, (e) => { e.preventDefault(); }, false);
+  });
+
   return {
     state,
     open() { const b = api(); if (b) { b.open_file(); } },
@@ -574,6 +579,67 @@ class Api:
         save_config(self._config)
 
 
+def _install_file_drop(window: webview.Window, api: "Api") -> None:
+    """把文件拖放从 WebView2 手里接管过来。
+
+    WebView2 默认把拖进来的文件当作导航目标，于是系统默认程序被拉起来、GUI 被顶掉。
+    这里先关掉它自己的外部拖放，再让承载它的 WinForms 窗体接收拖放事件，拿到真实路径。
+
+    必须切到 UI 线程做：CoreWebView2 的成员只允许在 UI 线程访问。
+    """
+    try:
+        import clr
+
+        clr.AddReference("System.Windows.Forms")
+        from System import Action
+        from System.Windows.Forms import DataFormats, DragDropEffects
+    except Exception as exc:  # noqa: BLE001
+        print(f"拖放不可用（加载 WinForms 失败）：{exc}", file=sys.stderr)
+        return
+
+    # DragDropEffects.None 不能直接点出来：None 是 Python 关键字，只能 getattr
+    drag_none = getattr(DragDropEffects, "None")
+    drag_copy = DragDropEffects.Copy
+
+    try:
+        form = window.native
+    except Exception as exc:  # noqa: BLE001
+        print(f"拖放不可用（拿不到窗口对象）：{exc}", file=sys.stderr)
+        return
+
+    def on_drag_enter(sender, event):
+        event.Effect = (
+            drag_copy if event.Data.GetDataPresent(DataFormats.FileDrop) else drag_none
+        )
+
+    def on_drag_drop(sender, event):
+        try:
+            paths = list(event.Data.GetData(DataFormats.FileDrop) or [])
+        except Exception as exc:  # noqa: BLE001
+            print(f"读取拖入的文件失败：{exc}", file=sys.stderr)
+            return
+        if paths:
+            api.load_path(Path(paths[0]))
+
+    def attach():
+        try:
+            form.browser.webview.AllowExternalDrop = False
+        except Exception as exc:  # noqa: BLE001
+            print(f"关闭 WebView2 自身拖放失败：{exc}", file=sys.stderr)
+        try:
+            form.AllowDrop = True
+            form.DragEnter += on_drag_enter
+            form.DragDrop += on_drag_drop
+            print("文件拖放已就绪", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001
+            print(f"挂载拖放事件失败：{exc}", file=sys.stderr)
+
+    try:
+        form.BeginInvoke(Action(attach))
+    except Exception as exc:  # noqa: BLE001
+        print(f"拖放不可用（切 UI 线程失败）：{exc}", file=sys.stderr)
+
+
 def main() -> int:
     global _ACTIVE_WINDOW
 
@@ -597,6 +663,8 @@ def main() -> int:
         text_select=True,
     )
     _ACTIVE_WINDOW = window
+    # 拖放要等页面加载完再挂：那会儿 WebView2 控件才真正存在
+    window.events.loaded += lambda *_: _install_file_drop(window, api)
     webview.start(
         private_mode=False,
         storage_path=str(DATA_DIR / "webview"),
