@@ -694,9 +694,11 @@ class Api:
             self._show_entry()
 
     def go_home(self) -> None:
-        if self._index != 0:
-            self._index = 0
-            self._show_entry()
+        # 主页按新的一页入栈，而不是退回栈底，这样「后退」还能回到刚才那份文档
+        if self._history[self._index] is None:
+            return  # 已经在主页，不必再叠一层
+        self._push_history(None)
+        self._show_entry()
 
     def open_in_browser(self) -> None:
         if self._current is None:
