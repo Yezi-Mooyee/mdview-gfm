@@ -24,6 +24,8 @@ import sys
 import tempfile
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 
 def _set_dpi_awareness() -> None:
@@ -46,6 +48,8 @@ import webview  # noqa: E402  必须晚于 DPI 设置
 import mdview_core as core  # noqa: E402
 
 APP_DIR = Path(__file__).resolve().parent
+# 链接指向这些后缀的本地文件时，直接在窗口里切换，而不是丢给外部程序
+MARKDOWN_SUFFIXES = {".md", ".markdown", ".mdown", ".mkd", ".mdx", ".txt"}
 DATA_DIR = Path(os.environ.get("APPDATA") or Path.home()) / "mdview"
 CONFIG_PATH = DATA_DIR / "config.json"
 SHELL_PATH = Path(tempfile.gettempdir()) / "mdview" / "gui.html"
@@ -349,6 +353,20 @@ window.mdview = (function () {
     else if (e.ctrlKey && e.key === "0") { e.preventDefault(); mdview.resetZoom(); }
   });
 
+  // 页面里的链接一律不在 WebView 内导航，否则目标页面会把整个 GUI 顶掉且退不回来。
+  // 页内锚点（#fn-1 这类）除外，那是文档内部的跳转。
+  function interceptLink(e) {
+    const link = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+    if (!link) { return; }
+    const href = link.getAttribute("href") || "";
+    if (href.startsWith("#")) { return; }
+    e.preventDefault();
+    const bridge = api();
+    if (bridge) { bridge.open_link(link.href); }
+  }
+  document.addEventListener("click", interceptLink);
+  document.addEventListener("auxclick", interceptLink);
+
   return {
     state,
     open() { const b = api(); if (b) { b.open_file(); } },
@@ -479,6 +497,29 @@ class Api:
 
     def open_path(self, path: str) -> None:
         self.load_path(Path(path))
+
+    def open_link(self, url: str) -> None:
+        """把文档里的链接交给系统处理，绝不让 WebView 自己导航过去。
+
+        本地 Markdown 直接在本窗口里切换，其余文件交给系统默认程序，网页交给浏览器。
+        """
+        parsed = urlparse(url)
+        if parsed.scheme == "file":
+            target = Path(url2pathname(parsed.path))
+            if target.suffix.lower() in MARKDOWN_SUFFIXES and target.is_file():
+                self.load_path(target)
+            elif target.exists():
+                try:
+                    os.startfile(target)  # noqa: S606  交给系统默认程序
+                except OSError as exc:
+                    print(f"打开文件失败：{exc}", file=sys.stderr)
+            else:
+                print(f"链接指向的文件不存在：{target}", file=sys.stderr)
+            return
+        if parsed.scheme in ("http", "https", "mailto"):
+            webbrowser.open(url)
+            return
+        print(f"未处理的链接协议：{url}", file=sys.stderr)
 
     def reload(self) -> None:
         if self._current is not None:
