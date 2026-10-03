@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -369,10 +370,17 @@ window.mdview = (function () {
   document.addEventListener("click", interceptLink);
   document.addEventListener("auxclick", interceptLink);
 
-  // 兜底：万一 WebView2 还在处理外部拖放，至少别让它把页面导航走
-  ["dragover", "drop"].forEach((type) => {
-    window.addEventListener(type, (e) => { e.preventDefault(); }, false);
-  });
+  // 拖文件进来：外部拖放被 WebView2 自己吃掉了，父窗体既收不到也没法让它透传，
+  // 只能让页面把 File 对象交给宿主，由宿主从 AdditionalObjects 里取出真实路径。
+  window.addEventListener("dragover", (e) => { e.preventDefault(); }, false);
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const files = e.dataTransfer ? Array.from(e.dataTransfer.files || []) : [];
+    const bridge = window.chrome && window.chrome.webview;
+    if (files.length && bridge && bridge.postMessageWithAdditionalObjects) {
+      bridge.postMessageWithAdditionalObjects("mdview:file-drop", files);
+    }
+  }, false);
 
   return {
     state,
@@ -580,26 +588,27 @@ class Api:
 
 
 def _install_file_drop(window: webview.Window, api: "Api") -> None:
-    """把文件拖放从 WebView2 手里接管过来。
+    """接管文件拖放，让拖进来的文件在本窗口打开。
 
-    WebView2 默认把拖进来的文件当作导航目标，于是系统默认程序被拉起来、GUI 被顶掉。
-    这里先关掉它自己的外部拖放，再让承载它的 WinForms 窗体接收拖放事件，拿到真实路径。
+    两个坑都踩过了，所以这里这么写：
 
-    必须切到 UI 线程做：CoreWebView2 的成员只允许在 UI 线程访问。
+    1. WebView2 在无窗口模式下自己吃掉了外部拖放，父窗体既收不到事件、也没法让它透传
+       （关掉 AllowExternalDrop 只会让它变成「拒绝接收」：内容区光标变禁止样式，事件
+       照样不上传，只有 WebView 盖不到的标题栏才落到窗体上）。所以只能走 WebView2 自己
+       的通道：页面在 drop 事件里用 postMessageWithAdditionalObjects 把 File 对象交给
+       宿主，宿主再从 AdditionalObjects 里读出真实路径。
+    2. 拖放事件本身在 UI 线程上跑。处理器里一旦同步等 JS 执行（evaluate_js），UI 线程
+       和 OLE 拖放的源进程会一起卡死——表现就是窗口「未响应」，连资源管理器也跟着僵住，
+       直到强关窗口才把积压的操作一次性放出来。所以加载动作必须丢给后台线程后立刻返回。
     """
     try:
         import clr
 
         clr.AddReference("System.Windows.Forms")
         from System import Action
-        from System.Windows.Forms import DataFormats, DragDropEffects
     except Exception as exc:  # noqa: BLE001
         print(f"拖放不可用（加载 WinForms 失败）：{exc}", file=sys.stderr)
         return
-
-    # DragDropEffects.None 不能直接点出来：None 是 Python 关键字，只能 getattr
-    drag_none = getattr(DragDropEffects, "None")
-    drag_copy = DragDropEffects.Copy
 
     try:
         form = window.native
@@ -607,32 +616,36 @@ def _install_file_drop(window: webview.Window, api: "Api") -> None:
         print(f"拖放不可用（拿不到窗口对象）：{exc}", file=sys.stderr)
         return
 
-    def on_drag_enter(sender, event):
-        event.Effect = (
-            drag_copy if event.Data.GetDataPresent(DataFormats.FileDrop) else drag_none
-        )
-
-    def on_drag_drop(sender, event):
+    def on_web_message(sender, event):
         try:
-            paths = list(event.Data.GetData(DataFormats.FileDrop) or [])
+            if event.WebMessageAsJson != '"mdview:file-drop"':
+                return  # 不是拖放消息，留给 pywebview 自己处理
+        except Exception:  # noqa: BLE001
+            return
+        try:
+            items = list(event.AdditionalObjects or [])
         except Exception as exc:  # noqa: BLE001
             print(f"读取拖入的文件失败：{exc}", file=sys.stderr)
             return
-        if paths:
-            api.load_path(Path(paths[0]))
+        for item in items:
+            try:
+                path = item.Path
+            except Exception:  # noqa: BLE001
+                continue
+            if not path:
+                continue
+            # 此刻仍在 UI 线程上，同步加载会死锁，必须甩出去
+            threading.Thread(
+                target=api.load_path, args=(Path(path),), daemon=True
+            ).start()
+            return
 
     def attach():
         try:
-            form.browser.webview.AllowExternalDrop = False
-        except Exception as exc:  # noqa: BLE001
-            print(f"关闭 WebView2 自身拖放失败：{exc}", file=sys.stderr)
-        try:
-            form.AllowDrop = True
-            form.DragEnter += on_drag_enter
-            form.DragDrop += on_drag_drop
+            form.browser.webview.CoreWebView2.WebMessageReceived += on_web_message
             print("文件拖放已就绪", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001
-            print(f"挂载拖放事件失败：{exc}", file=sys.stderr)
+            print(f"挂载拖放通道失败：{exc}", file=sys.stderr)
 
     try:
         form.BeginInvoke(Action(attach))
