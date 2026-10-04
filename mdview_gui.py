@@ -210,10 +210,10 @@ SHELL = r"""<!DOCTYPE html>
     border: 1px solid var(--btn-border); border-radius: 6px;
     cursor: pointer; white-space: nowrap;
   }
-  button:hover:not(:disabled):not(.active) { border-color: var(--accent); color: var(--accent); }
+  button:hover:not(:disabled):not(.active):not(.confirming) { border-color: var(--accent); color: var(--accent); }
   /* 按下得有按下的样子：沉下去 1px 再垫一层底色。只用边框变色的话，点起来像点不动。
      transform 不参与布局，所以工具栏高度和按钮位置不会因此变化。 */
-  button:active:not(:disabled) {
+  button:active:not(:disabled):not(.confirming) {
     background: var(--btn-active-bg);
     border-color: var(--accent); color: var(--accent);
     transform: translateY(1px);
@@ -313,6 +313,12 @@ SHELL = r"""<!DOCTYPE html>
   #recent-list li { padding: 5px 0; border-bottom: 1px solid var(--bar-border); }
   #recent-list a { color: var(--accent); text-decoration: none; word-break: break-all; }
   #recent-list a:hover { text-decoration: underline; }
+  /* 清空记录要点两下：第一下先把按钮染红、旁边给出提示，第二下才真清。
+     红色走的是错误色变量，深浅两套主题都已经配过。 */
+  #btn-clear-recent.confirming {
+    background: var(--err-bg); border-color: var(--err-fg); color: var(--err-fg);
+  }
+  #clear-hint { margin-left: 8px; font-size: 13px; color: var(--err-fg); }
   /* 已经不在磁盘上的条目照样留在列表里，但一眼要能看出它点不开 */
   #recent-list li.missing a { color: var(--muted); }
   .recent-tag {
@@ -369,7 +375,10 @@ SHELL = r"""<!DOCTYPE html>
       <div id="recent-box" hidden>
         <h2>最近打开</h2>
         <ul id="recent-list"></ul>
-        <p><button onclick="mdview.clearRecent()">清空记录</button></p>
+        <p id="clear-area">
+          <button id="btn-clear-recent" onclick="mdview.clearRecent()">清空记录</button>
+          <span id="clear-hint" hidden>再次点击清空记录</span>
+        </p>
       </div>
     </div>
   </article>
@@ -505,6 +514,17 @@ window.mdview = (function () {
     if (bannerAutoClose && !$("file-error").hidden) { armBannerTimers(); }
   }
 
+  // 清空记录要点两下：第一下只是把按钮染红并给出提示，第二下才真清
+  let clearArmed = false;
+
+  function disarmClear() {
+    clearArmed = false;
+    const btn = $("btn-clear-recent");
+    if (btn) { btn.classList.remove("confirming"); }
+    const hint = $("clear-hint");
+    if (hint) { hint.hidden = true; }
+  }
+
   // 前后翻历史时每一页都是现从硬盘读的，读不到就不能留着上一页的内容：
   // 留在屏幕上会被当成「这页的内容」，实际那是另一个文件。
   function showErrorPage(d) {
@@ -564,6 +584,7 @@ window.mdview = (function () {
 
   function showWelcome(items) {
     hideBanner();
+    disarmClear();   // 欢迎页整块重画过，确认态跟着一起归零
     $("doc").innerHTML = WELCOME_HTML;
     $("file-name").textContent = "未打开文件";
     $("file-dir").textContent = "";
@@ -625,6 +646,13 @@ window.mdview = (function () {
     else if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); mdview.back(); }
     else if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); mdview.forward(); }
     else if (e.altKey && e.key === "Home") { e.preventDefault(); mdview.home(); }
+  });
+
+  // 清空记录只点了一半就跑去点别处，视为放弃：确认态必须自己退回去
+  document.addEventListener("click", (e) => {
+    if (!clearArmed) { return; }
+    if (e.target && e.target.closest && e.target.closest("#clear-area")) { return; }
+    disarmClear();
   });
 
   // 页面里的链接一律不在 WebView 内导航，否则目标页面会把整个 GUI 顶掉且退不回来。
@@ -694,7 +722,20 @@ window.mdview = (function () {
     reload() { const b = api(); if (b) { b.reload(); } },
     browser() { const b = api(); if (b) { b.open_in_browser(); } },
     openRecent(p) { const b = api(); if (b) { b.open_path(p); } },
-    clearRecent() { const b = api(); if (b) { b.clear_recent(); } setRecent([]); },
+    clearRecent() {
+      const btn = $("btn-clear-recent");
+      if (!clearArmed) {
+        // 第一下：把按钮染红、旁边挂一句提示，这一步不动任何数据
+        clearArmed = true;
+        if (btn) { btn.classList.add("confirming"); }
+        const hint = $("clear-hint");
+        if (hint) { hint.hidden = false; }
+        return;
+      }
+      disarmClear();
+      const b = api(); if (b) { b.clear_recent(); }
+      setRecent([]);
+    },
     zoom(delta) { applyZoom(state.zoom + delta); const b = api(); if (b) { b.set_zoom(state.zoom); } },
     resetZoom() { applyZoom(100); const b = api(); if (b) { b.set_zoom(100); } },
     theme(mode) { applyTheme(mode); const b = api(); if (b) { b.set_theme(mode); } },
@@ -972,7 +1013,11 @@ class Api:
             self.load_path(Path(result[0]))
 
     def open_path(self, path: str) -> None:
-        self.load_path(Path(path))
+        if not self.load_path(Path(path)):
+            # 打不开多半是这条已经不在原处了：顺手把列表重推一遍，让它当场变成「已失效」，
+            # 而不是留着一条看起来还能点、点一次报一次的蓝链接
+            self._reload_recent()
+            self._push_recent()
 
     def open_link(self, url: str) -> None:
         """把文档里的链接交给系统处理，绝不让 WebView 自己导航过去。
@@ -1022,6 +1067,10 @@ class Api:
         stored = load_config()
         self._config["recent"] = [str(p) for p in stored.get("recent", [])]
         self._config["last_dir"] = stored.get("last_dir") or self._config.get("last_dir", "")
+
+    def _push_recent(self) -> None:
+        """把最近列表推给页面。列表只在欢迎页用得到，前端自己会判断元素在不在。"""
+        self._push(f"window.mdview.setRecent({core.to_js(self._recent_items())});")
 
     def _show_entry(self) -> None:
         entry = self._history[self._index]

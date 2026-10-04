@@ -121,7 +121,15 @@ missing entry is an ordinary failed load and reports itself like any other (§10
 Reload works on the welcome page too. There `_current` is `None`, which used to mean
 `reload()` returned immediately and F5 did nothing at all; now it re-runs
 `_show_entry()`, so the existence flags are recomputed — useful both for files that
-came back and for ones that were moved away after the list was drawn.
+came back and for ones that were moved away after the list was drawn. For the same
+reason `open_path()` re-pushes the list when the load fails: the entry the user just
+clicked is exactly the one that turned out to be stale.
+
+Clearing the list takes two clicks. The first only turns the button red and prints
+"click again" beside it; the second does the work, and a click anywhere else drops
+the confirmation. That state lives entirely in the front end — the welcome markup is
+rebuilt from `WELCOME_HTML` and the confirmation resets with it, so nothing can be
+left armed behind the user's back.
 
 The config file is read as `utf-8-sig`. Notepad (and Windows PowerShell 5.1's
 `-Encoding UTF8`) writes a BOM; reading it as plain `utf-8` yields invalid JSON, and
