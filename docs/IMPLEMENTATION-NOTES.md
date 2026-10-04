@@ -126,10 +126,22 @@ reason `open_path()` re-pushes the list when the load fails: the entry the user 
 clicked is exactly the one that turned out to be stale.
 
 Clearing the list takes two clicks. The first only turns the button red and prints
-"click again" beside it; the second does the work, and a click anywhere else drops
-the confirmation. That state lives entirely in the front end — the welcome markup is
-rebuilt from `WELCOME_HTML` and the confirmation resets with it, so nothing can be
-left armed behind the user's back.
+"click again" beside it; the second does the work. The confirmation is dropped by a
+click anywhere else — on **any** mouse button, which is why it listens for
+`pointerdown` and not `click` (middle and right clicks produce no `click` at all) — by
+the window losing focus, and by the pointer leaving the document entirely.
+
+That last case is what covers the title bar: it belongs to Windows, not to the page,
+so no DOM event lands there and the window does not lose focus either. The signal that
+does arrive is `mouseout` with an empty `relatedTarget`; moving between elements leaves
+`relatedTarget` set, so the two are easy to tell apart. `mouseleave` is **not** usable
+here — it does not bubble, so a listener on `document` or `<html>` never fires, which
+cost a detour to notice because a synthetic `dispatchEvent` on `document` happily
+triggers it. Only a real pointer leaving the window exposes the difference.
+
+That state lives entirely in the front end — the welcome markup is rebuilt from
+`WELCOME_HTML` and the confirmation resets with it, so nothing can be left armed behind
+the user's back.
 
 The config file is read as `utf-8-sig`. Notepad (and Windows PowerShell 5.1's
 `-Encoding UTF8`) writes a BOM; reading it as plain `utf-8` yields invalid JSON, and

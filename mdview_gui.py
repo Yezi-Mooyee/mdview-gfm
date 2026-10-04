@@ -648,12 +648,27 @@ window.mdview = (function () {
     else if (e.altKey && e.key === "Home") { e.preventDefault(); mdview.home(); }
   });
 
-  // 清空记录只点了一半就跑去点别处，视为放弃：确认态必须自己退回去
-  document.addEventListener("click", (e) => {
+  // 清空记录只点了一半就跑去点别处，视为放弃：确认态必须自己退回去。
+  // 用 pointerdown 而不是 click：中键和右键压根不产生 click，盯着 click 的话它们点哪儿
+  // 都不算数。按钮自己仍然只认左键（那一步挂在 click 上）。
+  document.addEventListener("pointerdown", (e) => {
     if (!clearArmed) { return; }
     if (e.target && e.target.closest && e.target.closest("#clear-area")) { return; }
     disarmClear();
   });
+
+  // 鼠标挪到标题栏、或者拖着窗口走，都不会再有别的 DOM 事件落到文档上，只剩「指针离开
+  // 整个文档」这一下会通知我们，所以这条路靠它兜底。
+  // 用的是 mouseout + relatedTarget 为空，而不是 mouseleave：后者不冒泡，挂在 document 或
+  // <html> 上都收不到（真机上实测如此），而 mouseout 会冒泡，离开时的 relatedTarget 一定是
+  // null，元素之间挪动则不是，正好区分得开。
+  document.addEventListener("mouseout", (e) => {
+    if (e.relatedTarget) { return; }
+    disarmClear();
+  });
+
+  // 窗口一失焦同样算放弃：人都切到别的窗口去了，回来时不该还留着一个上了膛的按钮
+  window.addEventListener("blur", disarmClear);
 
   // 页面里的链接一律不在 WebView 内导航，否则目标页面会把整个 GUI 顶掉且退不回来。
   // 页内锚点（#fn-1 这类）除外，那是文档内部的跳转。
