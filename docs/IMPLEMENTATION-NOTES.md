@@ -81,6 +81,13 @@ way back. Clicks are intercepted and handed to Python:
 - Local Markdown goes through `load_path`; web links go to the system browser;
   anything else goes to `os.startfile`.
 
+Hovering a link shows its target in the status bar, and that target comes from
+`data-href` first. The recent list hangs its entries on JavaScript and only carries
+`href="#"` as a placeholder, so the resolved `link.href` is the shell page's own
+address with a `#` on the end — which is exactly what the status bar used to show on
+the welcome page. In-document anchors (`#fn-1`) now show nothing, since there is no
+address worth printing.
+
 ---
 
 ## 4. Navigation history
@@ -110,6 +117,11 @@ history is worse than showing a dead entry. `_recent_items()` computes
 `{"path", "exists"}` at push time and the list marks the missing ones; the stored
 format stays a plain list of strings, so `config.json` is unchanged. Clicking a
 missing entry is an ordinary failed load and reports itself like any other (§10).
+
+Reload works on the welcome page too. There `_current` is `None`, which used to mean
+`reload()` returned immediately and F5 did nothing at all; now it re-runs
+`_show_entry()`, so the existence flags are recomputed — useful both for files that
+came back and for ones that were moved away after the list was drawn.
 
 The config file is read as `utf-8-sig`. Notepad (and Windows PowerShell 5.1's
 `-Encoding UTF8`) writes a BOM; reading it as plain `utf-8` yields invalid JSON, and
@@ -191,7 +203,10 @@ without the message at 1200×620 gives zero differing pixels below the toolbar a
 identical `#scroll` height (653 px). A strip that pushes the document down would
 move the text out from under the reader's eyes.
 
-**Who closes it.** Every message has a close button. Messages triggered by a user
+**Who closes it.** The whole message is the close button — clicking anywhere on it
+dismisses it (Enter or Space too, since it is `role="button"`); the ✕ is only a glyph
+and takes no pointer events, because a ✕ that is the sole hit target tells people the
+rest of the strip is dead. Messages triggered by a user
 action (open, reload, drop, recent entry) also count down from 3 s and then fade. The
 one produced by a failed *startup* load stays until it is dismissed or a document
 loads successfully: at that point the window is empty and nothing else explains

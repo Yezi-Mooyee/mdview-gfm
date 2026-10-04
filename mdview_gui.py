@@ -160,7 +160,7 @@ SHELL = r"""<!DOCTYPE html>
 <style>
   :root {
     --page-bg: #ffffff; --bar-bg: #f6f8fa; --bar-fg: #1f2328;
-    --bar-border: #d1d9e0; --btn-bg: #ffffff; --btn-border: #d1d9e0;
+    --bar-border: #d1d9e0; --btn-bg: #ffffff; --btn-border: #d1d9e0; --btn-active-bg: #eaeef2;
     --muted: #59636e; --accent: #0969da; --accent-fg: #ffffff;
     --err-bg: #fff0ee; --err-fg: #d1242f; --err-border: #ffc9c4;
     --content-width: 1012px; --zoom: 1;
@@ -169,7 +169,7 @@ SHELL = r"""<!DOCTYPE html>
   @media (prefers-color-scheme: dark) {
     html:not([data-forced-theme="light"]) {
       --page-bg: #0d1117; --bar-bg: #151b23; --bar-fg: #f0f6fc;
-      --bar-border: #3d444d; --btn-bg: #212830; --btn-border: #3d444d;
+      --bar-border: #3d444d; --btn-bg: #212830; --btn-border: #3d444d; --btn-active-bg: #2a313c;
       --muted: #9198a1; --accent: #4493f8; --accent-fg: #ffffff;
       --err-bg: #2d1416; --err-fg: #ff7b72; --err-border: #6e2a2a;
     }
@@ -177,13 +177,13 @@ SHELL = r"""<!DOCTYPE html>
   /* 手动指定主题时覆盖系统偏好，所以必须排在上面两段之后 */
   html[data-forced-theme="light"] {
     --page-bg: #ffffff; --bar-bg: #f6f8fa; --bar-fg: #1f2328;
-    --bar-border: #d1d9e0; --btn-bg: #ffffff; --btn-border: #d1d9e0;
+    --bar-border: #d1d9e0; --btn-bg: #ffffff; --btn-border: #d1d9e0; --btn-active-bg: #eaeef2;
     --muted: #59636e; --accent: #0969da;
     --err-bg: #fff0ee; --err-fg: #d1242f; --err-border: #ffc9c4;
   }
   html[data-forced-theme="dark"] {
     --page-bg: #0d1117; --bar-bg: #151b23; --bar-fg: #f0f6fc;
-    --bar-border: #3d444d; --btn-bg: #212830; --btn-border: #3d444d;
+    --bar-border: #3d444d; --btn-bg: #212830; --btn-border: #3d444d; --btn-active-bg: #2a313c;
     --muted: #9198a1; --accent: #4493f8;
     --err-bg: #2d1416; --err-fg: #ff7b72; --err-border: #6e2a2a;
   }
@@ -211,6 +211,19 @@ SHELL = r"""<!DOCTYPE html>
     cursor: pointer; white-space: nowrap;
   }
   button:hover:not(:disabled):not(.active) { border-color: var(--accent); color: var(--accent); }
+  /* 按下得有按下的样子：沉下去 1px 再垫一层底色。只用边框变色的话，点起来像点不动。
+     transform 不参与布局，所以工具栏高度和按钮位置不会因此变化。 */
+  button:active:not(:disabled) {
+    background: var(--btn-active-bg);
+    border-color: var(--accent); color: var(--accent);
+    transform: translateY(1px);
+  }
+  /* 已经是选中态的主题按钮，按下时底色不能被上面那条拉回去。
+     这里必须带 :not(:disabled)，否则特异性输给上面那条，选中态按下去会翻成浅底。 */
+  button.active:active:not(:disabled) {
+    background: var(--accent); border-color: var(--accent); color: var(--accent-fg);
+    transform: translateY(1px);
+  }
   button:disabled { opacity: .5; cursor: default; }
   button.active { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
   button.icon { min-width: 36px; padding: 0 8px; }
@@ -227,16 +240,21 @@ SHELL = r"""<!DOCTYPE html>
   }
   /* 打不开文件时的提示就长在文件名/路径这一格上：工具栏高度不变，正文区域的
      尺寸和位置也一点不动，不会顶得内容跳一下。边框和内边距常驻，悬停时只换颜色，
-     所以框亮起来的时候文字一个像素都不挪。 */
+     所以框亮起来的时候文字一个像素都不挪。
+     宽度贴着内容，到 ✕ 就结束，不铺满整格。 */
   #file-error {
-    flex: 1 1 auto; min-width: 0;
+    flex: 0 1 auto; min-width: 0; max-width: 100%;
     display: flex; align-items: center; gap: 6px;
     padding: 1px 6px;
     border: 1px solid transparent; border-radius: 6px;
     color: var(--err-fg);
+    cursor: pointer;
   }
   #file-error[hidden] { display: none; }
-  #file-error:hover { border-color: var(--err-fg); background: var(--err-bg); }
+  #file-error:hover, #file-error:focus-visible {
+    border-color: var(--err-fg); background: var(--err-bg);
+  }
+  #file-error:focus-visible { outline: none; }
   #file-error-text {
     flex: 0 1 auto; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -250,12 +268,12 @@ SHELL = r"""<!DOCTYPE html>
   }
   /* 鼠标停在提示上时计时是停住的，数字就没必要还挂在那儿占眼睛 */
   #file-error:hover #file-countdown { visibility: hidden; }
+  /* 只是个符号：点击由整格接，所以它自己不吃指针事件 */
   #file-error-close {
-    flex: 0 0 auto; min-height: 20px; min-width: 20px; padding: 0;
+    flex: 0 0 auto;
     font-size: 12px; line-height: 1;
-    color: var(--err-fg); background: transparent; border-color: transparent;
+    pointer-events: none;
   }
-  #file-error-close:hover { color: var(--err-fg); border-color: var(--err-fg); }
   #zoom-label { font-size: 13px; color: var(--muted); min-width: 42px; text-align: center; }
 
   #scroll { flex: 1 1 auto; overflow: auto; }
@@ -322,11 +340,12 @@ SHELL = r"""<!DOCTYPE html>
   <div id="filebox">
     <span id="file-name">未打开文件</span>
     <span id="file-dir"></span>
-    <!-- 打不开文件时换成这一格显示：位置、高度都和文件名/路径一样，正文不会被挤动 -->
-    <span id="file-error" hidden>
+    <!-- 打不开文件时换成这一格显示：位置、高度都和文件名/路径一样，正文不会被挤动。
+         整格都能点，点了就收起提示——光给 ✕ 挂点击等于告诉人别处不能点。 -->
+    <span id="file-error" hidden tabindex="0" role="button" aria-label="关闭提示">
       <span id="file-error-text"></span>
       <span id="file-countdown"></span>
-      <button id="file-error-close" type="button" onclick="mdview.dismissBanner()" title="关闭提示" aria-label="关闭提示">✕</button>
+      <span id="file-error-close" aria-hidden="true">✕</span>
     </span>
   </div>
   <div class="group">
@@ -445,10 +464,25 @@ window.mdview = (function () {
     if (dir) { dir.hidden = false; }
   }
 
-  // 系统给的那个悬停标签是整行画出来的，长路径会顶出屏幕被裁掉；在分隔符后面折行，
-  // 才保证整条路径都看得见
+  // 系统那个悬停标签是单行画出来的，长了会顶出屏幕被裁掉；可是每段都折一行又碎得
+  // 没法看。所以按大致行宽凑行：短路径压根不折，长的才在分隔符处断开。
+  const TOOLTIP_WIDTH = 72;   // 以半角字符为单位的行宽上限
+  function textWidth(s) {
+    let n = 0;
+    for (const ch of s) { n += ch.codePointAt(0) > 0x2e7f ? 2 : 1; }
+    return n;
+  }
+
   function tooltipFor(text) {
-    return text.replace(/([\\/])/g, "$1\n");
+    if (textWidth(text) <= TOOLTIP_WIDTH) { return text; }
+    const lines = [];
+    let line = "";
+    for (const part of text.split(/(?<=[\\/])/)) {   // 在分隔符后面切开，分隔符留着
+      if (line && textWidth(line + part) > TOOLTIP_WIDTH) { lines.push(line); line = part; }
+      else { line += part; }
+    }
+    if (line) { lines.push(line); }
+    return lines.join("\n");
   }
 
   function showBanner(text, autoClose) {
@@ -512,7 +546,8 @@ window.mdview = (function () {
       const exists = typeof item === "string" ? true : item.exists !== false;
       const li = document.createElement("li");
       const a = document.createElement("a");
-      a.href = "#"; a.textContent = path; a.title = path;
+      // href 只作占位，真实路径记在 data-href 上：状态栏显示的就是它
+      a.href = "#"; a.dataset.href = path; a.textContent = path; a.title = tooltipFor(path);
       a.onclick = (e) => { e.preventDefault(); mdview.openRecent(path); };
       li.appendChild(a);
       if (!exists) {
@@ -567,12 +602,17 @@ window.mdview = (function () {
   if (window.pywebview) { bind(); }
   else { window.addEventListener("pywebviewready", bind); }
 
-  // 提示那一格的悬停监听放在这里而不是 bind() 里：元素一直都在，绑在 bind() 里就等于
+  // 提示那一格的监听放在这里而不是 bind() 里：元素一直都在，绑在 bind() 里就等于
   // 把「鼠标压上去就不自动关」这条行为挂在了 pywebview 就绪上，没就绪时它会照关不误。
   const bannerBox = $("file-error");
   if (bannerBox) {
     bannerBox.addEventListener("mouseenter", () => hoverBanner(true));
     bannerBox.addEventListener("mouseleave", () => hoverBanner(false));
+    // 整格可点：点了就收起提示（✕ 只是符号，不吃指针事件）
+    bannerBox.addEventListener("click", () => hideBanner());
+    bannerBox.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); hideBanner(); }
+    });
   }
 
   window.addEventListener("keydown", (e) => {
@@ -608,22 +648,32 @@ window.mdview = (function () {
   function linkOf(target) {
     return target && target.closest ? target.closest("a[href]") : null;
   }
-  function showLink(href) {
+
+  // 状态栏该显示什么：最近列表那类链接是 href="#" 挂在 JS 上的占位，读 link.href 只会
+  // 得到内部 shell 页面自己的地址（还会带上 #），显示出来是错的。它们把真实路径记在
+  // data-href 上，这里优先取它；纯锚点则没什么可显示的。
+  function linkTarget(link) {
+    if (!link) { return ""; }
+    if (link.dataset && link.dataset.href) { return link.dataset.href; }
+    const href = link.getAttribute("href") || "";
+    if (href.startsWith("#")) { return ""; }
+    return link.href;
+  }
+
+  function showLink(target) {
     const text = $("status-text");
     if (!text) { return; }
-    if (!href) { text.textContent = ""; return; }
+    if (!target) { text.textContent = ""; return; }
     // file:///C:/x/y.md 显示成本地路径更好读
-    text.textContent = href.startsWith("file:///")
-      ? decodeURIComponent(href.slice(8)).replace(/\//g, "\\")
-      : href;
+    text.textContent = target.startsWith("file:///")
+      ? decodeURIComponent(target.slice(8)).replace(/\//g, "\\")
+      : target;
   }
   document.addEventListener("mouseover", (e) => {
-    const link = linkOf(e.target);
-    showLink(link ? link.href : null);
+    showLink(linkTarget(linkOf(e.target)));
   });
   document.addEventListener("mouseout", (e) => {
-    const link = linkOf(e.relatedTarget);
-    showLink(link ? link.href : null);
+    showLink(linkTarget(linkOf(e.relatedTarget)));
   });
 
   // 拖文件进来：外部拖放被 WebView2 自己吃掉了，父窗体既收不到也没法让它透传，
@@ -952,9 +1002,16 @@ class Api:
         print(f"未处理的链接协议：{url}", file=sys.stderr)
 
     def reload(self) -> None:
+        """刷新当前页。
+
+        欢迎页没有文件可读，那就重新核对一遍最近列表：标着「已失效」的条目可能已经
+        被放回原处，刚挪走的文件也可能又在了。
+        """
         if self._current is not None:
             # 刷新要停在原处，否则读长文档时每次刷新都被弹回顶部
             self.load_path(self._current, keep_scroll=True)
+        else:
+            self._show_entry()
 
     def _reload_recent(self) -> None:
         """进主页时重读最近列表。
