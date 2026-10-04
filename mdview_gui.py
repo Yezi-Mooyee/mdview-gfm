@@ -226,18 +226,30 @@ SHELL = r"""<!DOCTYPE html>
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto;
   }
   /* 打不开文件时的提示就长在文件名/路径这一格上：工具栏高度不变，正文区域的
-     尺寸和位置也一点不动，不会顶得内容跳一下。 */
+     尺寸和位置也一点不动，不会顶得内容跳一下。边框和内边距常驻，悬停时只换颜色，
+     所以框亮起来的时候文字一个像素都不挪。 */
   #file-error {
     flex: 1 1 auto; min-width: 0;
     display: flex; align-items: center; gap: 6px;
+    padding: 1px 6px;
+    border: 1px solid transparent; border-radius: 6px;
     color: var(--err-fg);
   }
   #file-error[hidden] { display: none; }
+  #file-error:hover { border-color: var(--err-fg); background: var(--err-bg); }
   #file-error-text {
     flex: 0 1 auto; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     user-select: text;
   }
+  /* 定宽右对齐：数字从 3 走到 1 也推不动旁边的文字 */
+  #file-countdown {
+    flex: 0 0 auto; min-width: 18px;
+    text-align: right; opacity: .7;
+    font-variant-numeric: tabular-nums;
+  }
+  /* 鼠标停在提示上时计时是停住的，数字就没必要还挂在那儿占眼睛 */
+  #file-error:hover #file-countdown { visibility: hidden; }
   #file-error-close {
     flex: 0 0 auto; min-height: 20px; min-width: 20px; padding: 0;
     font-size: 12px; line-height: 1;
@@ -313,6 +325,7 @@ SHELL = r"""<!DOCTYPE html>
     <!-- 打不开文件时换成这一格显示：位置、高度都和文件名/路径一样，正文不会被挤动 -->
     <span id="file-error" hidden>
       <span id="file-error-text"></span>
+      <span id="file-countdown"></span>
       <button id="file-error-close" type="button" onclick="mdview.dismissBanner()" title="关闭提示" aria-label="关闭提示">✕</button>
     </span>
   </div>
@@ -395,28 +408,67 @@ window.mdview = (function () {
   // 打不开文件时的提示，占用的正是文件名/路径那一格：工具栏高度不变，正文区域不会
   // 被顶得跳一下。autoClose 只在提示由用户当场操作触发时才为 true——启动时加载失败的
   // 提示要一直留着，否则用户只看到一个空窗口，说不清文件为什么没打开。
-  const BANNER_TIMEOUT = 6000;
-  let bannerTimer = 0;
+  const BANNER_TIMEOUT = 3000;
+  let bannerTickTimer = 0, bannerAutoClose = false;
+
+  function stopBannerTimers() {
+    if (bannerTickTimer) { clearInterval(bannerTickTimer); bannerTickTimer = 0; }
+  }
+
+  function setCountdown(seconds) {
+    const label = $("file-countdown");
+    if (label) { label.textContent = seconds > 0 ? seconds + "s" : ""; }
+  }
+
+  // 数字只是给人看的，元素宽度定死，所以从 3 走到 1 也不会带动旁边的文字。
+  // 关闭也交给这个表：另外再挂一个 setTimeout 会和它同一时刻到点，谁先跑还看调度，
+  // 先跑的那个会把另一个清掉，于是提示就永远不关了。
+  function armBannerTimers() {
+    stopBannerTimers();
+    let left = Math.round(BANNER_TIMEOUT / 1000);
+    setCountdown(left);
+    bannerTickTimer = setInterval(() => {
+      left -= 1;
+      if (left <= 0) { hideBanner(); return; }
+      setCountdown(left);
+    }, 1000);
+  }
 
   function hideBanner() {
-    if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = 0; }
+    stopBannerTimers();
+    bannerAutoClose = false;
+    setCountdown(0);
     const box = $("file-error");
-    if (box) { box.hidden = true; }
+    if (box) { box.hidden = true; box.removeAttribute("title"); }
     const name = $("file-name"), dir = $("file-dir");
     if (name) { name.hidden = false; }
     if (dir) { dir.hidden = false; }
+  }
+
+  // 系统给的那个悬停标签是整行画出来的，长路径会顶出屏幕被裁掉；在分隔符后面折行，
+  // 才保证整条路径都看得见
+  function tooltipFor(text) {
+    return text.replace(/([\\/])/g, "$1\n");
   }
 
   function showBanner(text, autoClose) {
     const box = $("file-error"), label = $("file-error-text");
     if (!box || !label) { return; }
     label.textContent = text;
-    label.title = text;   // 长路径会被省略号截掉，悬停能看全
+    // 悬停标签挂在整格上，鼠标落在这一格的任何位置（不只文字上）都能看到完整路径
+    box.title = tooltipFor(text);
     box.hidden = false;
     $("file-name").hidden = true;
     $("file-dir").hidden = true;
-    if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = 0; }
-    if (autoClose) { bannerTimer = setTimeout(hideBanner, BANNER_TIMEOUT); }
+    bannerAutoClose = !!autoClose;
+    if (bannerAutoClose) { armBannerTimers(); }
+    else { stopBannerTimers(); setCountdown(0); }
+  }
+
+  function hoverBanner(inside) {
+    // 鼠标压上来就停表，移开再给满 3 秒：正盯着看的时候消失最恼人
+    if (inside) { stopBannerTimers(); return; }
+    if (bannerAutoClose && !$("file-error").hidden) { armBannerTimers(); }
   }
 
   // 前后翻历史时每一页都是现从硬盘读的，读不到就不能留着上一页的内容：
@@ -514,6 +566,14 @@ window.mdview = (function () {
 
   if (window.pywebview) { bind(); }
   else { window.addEventListener("pywebviewready", bind); }
+
+  // 提示那一格的悬停监听放在这里而不是 bind() 里：元素一直都在，绑在 bind() 里就等于
+  // 把「鼠标压上去就不自动关」这条行为挂在了 pywebview 就绪上，没就绪时它会照关不误。
+  const bannerBox = $("file-error");
+  if (bannerBox) {
+    bannerBox.addEventListener("mouseenter", () => hoverBanner(true));
+    bannerBox.addEventListener("mouseleave", () => hoverBanner(false));
+  }
 
   window.addEventListener("keydown", (e) => {
     if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); mdview.open(); }

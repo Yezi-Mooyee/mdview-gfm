@@ -192,9 +192,28 @@ identical `#scroll` height (653 px). A strip that pushes the document down would
 move the text out from under the reader's eyes.
 
 **Who closes it.** Every message has a close button. Messages triggered by a user
-action (open, reload, drop, recent entry) also fade after 6 s. The one produced by a
-failed *startup* load stays until it is dismissed or a document loads successfully:
-at that point the window is empty and nothing else explains itself.
+action (open, reload, drop, recent entry) also count down from 3 s and then fade. The
+one produced by a failed *startup* load stays until it is dismissed or a document
+loads successfully: at that point the window is empty and nothing else explains
+itself.
+
+The countdown exists because a message that vanishes unannounced is worse than one
+that waits. It sits in a fixed-width box so 3 → 2 → 1 cannot nudge the text beside
+it. Hovering the message stops the clock and hides the digits (`#file-error:hover`
+hides `#file-countdown`); leaving resets it to a full 3 s. Closing is driven by that
+same interval rather than a second `setTimeout`: both timers came due in the same
+tick, whichever ran first cleared the other, and the message sometimes never closed
+at all.
+
+The hover listeners are attached at the top of the IIFE, **not** inside `bind()`.
+Binding them in `bind()` tied "hovering keeps it open" to pywebview being ready,
+and the message closed on schedule whenever it was not.
+
+Hovering also outlines the whole cell (a transparent 1 px border is always there,
+so only the colour changes and nothing shifts) and the native tooltip is attached to
+the cell instead of the text, so the full path is reachable anywhere on it. That
+tooltip is drawn as a single line by the OS; long paths are wrapped at separators or
+they run off the screen and get clipped.
 
 **History re-reads, so a missing page needs a page.** Open, reload, drop and recent
 entries all load into a document the user is already reading — the content stays and
