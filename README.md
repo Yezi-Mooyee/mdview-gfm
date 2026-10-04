@@ -106,7 +106,8 @@ Behaviour worth knowing:
 
 - Only the **left mouse button** triggers links. Middle and right click open nothing (right click still shows the context menu).
 - Links never open inside the window — local Markdown switches the document, web links go to your browser, other files go to their default program.
-- **Recent files** refresh every time you visit the home page, and entries whose file no longer exists are dropped. Two instances running side by side see each other's files.
+- **Recent files** refresh every time you visit the home page. Entries whose file has gone are kept and marked as missing, so a file you moved is still findable. Two instances running side by side see each other's files.
+- If a file cannot be read — deleted, renamed, or a folder — the name in the toolbar says why, and the close button beside it clears the message. Your document stays on screen, only the page you reached by Back/Forward is replaced by an explanation, since those re-read the file from disk.
 - Your theme, zoom level and recent files are remembered between runs.
 
 ## Startup time

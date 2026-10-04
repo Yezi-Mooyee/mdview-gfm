@@ -102,8 +102,14 @@ A plain list plus an index, with `None` representing the home page.
 
 `_remember()` re-reads `config.json` from disk *before* writing, and merges, so two
 instances running side by side do not swallow each other's entries. Entering the
-home page calls `_reload_recent()`, which re-reads the file and drops paths that no
-longer exist.
+home page calls `_reload_recent()`, which re-reads the file.
+
+Entries whose file has gone are **kept, not dropped**. The path is still the clue
+the user needs — the file usually just moved — and silently rewriting someone's
+history is worse than showing a dead entry. `_recent_items()` computes
+`{"path", "exists"}` at push time and the list marks the missing ones; the stored
+format stays a plain list of strings, so `config.json` is unchanged. Clicking a
+missing entry is an ordinary failed load and reports itself like any other (§10).
 
 The config file is read as `utf-8-sig`. Notepad (and Windows PowerShell 5.1's
 `-Encoding UTF8`) writes a BOM; reading it as plain `utf-8` yields invalid JSON, and
@@ -167,3 +173,42 @@ state intact. Because of that, the welcome page's markup is captured into
 
 `setRecent()` must guard against missing elements: once a document is open the
 welcome markup is gone, and `#recent-list` no longer exists.
+
+---
+
+## 10. When the file is gone
+
+Loading used to fail silently: `load_path()` wrote to stderr and returned `False`,
+and the page was never told. Started from the Start menu the process is `pythonw`,
+which has no console to write to, so "file not found" was invisible while the
+previous document stayed on screen as if nothing had happened. Back/forward were
+worse: the cursor moved, the buttons updated, and the view did not.
+
+**Feedback must not change the layout.** The message takes over the toolbar cell
+that shows the file name and directory (`#file-error` replaces `#file-name` /
+`#file-dir`) instead of occupying a row of its own. Rendering the same page with and
+without the message at 1200×620 gives zero differing pixels below the toolbar and an
+identical `#scroll` height (653 px). A strip that pushes the document down would
+move the text out from under the reader's eyes.
+
+**Who closes it.** Every message has a close button. Messages triggered by a user
+action (open, reload, drop, recent entry) also fade after 6 s. The one produced by a
+failed *startup* load stays until it is dismissed or a document loads successfully:
+at that point the window is empty and nothing else explains itself.
+
+**History re-reads, so a missing page needs a page.** Open, reload, drop and recent
+entries all load into a document the user is already reading — the content stays and
+only the message changes. Back/forward is a different case: every step re-reads that
+file from disk, there is no cache, so leaving the previous document on screen would
+present another file's content as this page's. It gets an error page instead, while
+the cursor keeps moving normally so both directions stay usable.
+
+Startup adds the constraint from §6: `initial_document()` carries the failure back
+as `{"error": ...}` and the page raises the message itself, because a `js_api` method
+with a return value must not call `evaluate_js`.
+
+The load failure paths are exercised by a driver that opens a real pywebview window
+and reads the resulting DOM state back (button `disabled` flags, whether the message
+is shown, `#scroll` height), which is more reliable than sending keystrokes to a
+WebView2 window.
+

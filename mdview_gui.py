@@ -162,6 +162,7 @@ SHELL = r"""<!DOCTYPE html>
     --page-bg: #ffffff; --bar-bg: #f6f8fa; --bar-fg: #1f2328;
     --bar-border: #d1d9e0; --btn-bg: #ffffff; --btn-border: #d1d9e0;
     --muted: #59636e; --accent: #0969da; --accent-fg: #ffffff;
+    --err-bg: #fff0ee; --err-fg: #d1242f; --err-border: #ffc9c4;
     --content-width: 1012px; --zoom: 1;
   }
   /* 系统深色时生效，但「强制浅色」要能压过它 */
@@ -170,6 +171,7 @@ SHELL = r"""<!DOCTYPE html>
       --page-bg: #0d1117; --bar-bg: #151b23; --bar-fg: #f0f6fc;
       --bar-border: #3d444d; --btn-bg: #212830; --btn-border: #3d444d;
       --muted: #9198a1; --accent: #4493f8; --accent-fg: #ffffff;
+      --err-bg: #2d1416; --err-fg: #ff7b72; --err-border: #6e2a2a;
     }
   }
   /* 手动指定主题时覆盖系统偏好，所以必须排在上面两段之后 */
@@ -177,11 +179,13 @@ SHELL = r"""<!DOCTYPE html>
     --page-bg: #ffffff; --bar-bg: #f6f8fa; --bar-fg: #1f2328;
     --bar-border: #d1d9e0; --btn-bg: #ffffff; --btn-border: #d1d9e0;
     --muted: #59636e; --accent: #0969da;
+    --err-bg: #fff0ee; --err-fg: #d1242f; --err-border: #ffc9c4;
   }
   html[data-forced-theme="dark"] {
     --page-bg: #0d1117; --bar-bg: #151b23; --bar-fg: #f0f6fc;
     --bar-border: #3d444d; --btn-bg: #212830; --btn-border: #3d444d;
     --muted: #9198a1; --accent: #4493f8;
+    --err-bg: #2d1416; --err-fg: #ff7b72; --err-border: #6e2a2a;
   }
 
   html, body { height: 100%; margin: 0; }
@@ -221,6 +225,25 @@ SHELL = r"""<!DOCTYPE html>
     color: var(--muted); direction: rtl; text-align: left;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto;
   }
+  /* 打不开文件时的提示就长在文件名/路径这一格上：工具栏高度不变，正文区域的
+     尺寸和位置也一点不动，不会顶得内容跳一下。 */
+  #file-error {
+    flex: 1 1 auto; min-width: 0;
+    display: flex; align-items: center; gap: 6px;
+    color: var(--err-fg);
+  }
+  #file-error[hidden] { display: none; }
+  #file-error-text {
+    flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    user-select: text;
+  }
+  #file-error-close {
+    flex: 0 0 auto; min-height: 20px; min-width: 20px; padding: 0;
+    font-size: 12px; line-height: 1;
+    color: var(--err-fg); background: transparent; border-color: transparent;
+  }
+  #file-error-close:hover { color: var(--err-fg); border-color: var(--err-fg); }
   #zoom-label { font-size: 13px; color: var(--muted); min-width: 42px; text-align: center; }
 
   #scroll { flex: 1 1 auto; overflow: auto; }
@@ -245,10 +268,30 @@ SHELL = r"""<!DOCTYPE html>
 
   .welcome { padding-top: 4vh; }
   .welcome h1 { border: 0; }
+  /* 历史里的文件已经没了时占满正文区，明确表示“这页打不开”，而不是留着上一页的内容 */
+  .load-error { padding-top: 4vh; }
+  .load-error h1 { border: 0; }
+  .load-error-path {
+    padding: 8px 12px; border-radius: 6px;
+    background: var(--err-bg); color: var(--err-fg);
+    border: 1px solid var(--err-border);
+    font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+    font-size: 13px; word-break: break-all;
+  }
+  .load-error .load-error-hint { color: var(--muted); }
   #recent-list { list-style: none; padding: 0; }
   #recent-list li { padding: 5px 0; border-bottom: 1px solid var(--bar-border); }
   #recent-list a { color: var(--accent); text-decoration: none; word-break: break-all; }
   #recent-list a:hover { text-decoration: underline; }
+  /* 已经不在磁盘上的条目照样留在列表里，但一眼要能看出它点不开 */
+  #recent-list li.missing a { color: var(--muted); }
+  .recent-tag {
+    display: inline-block; margin-left: 8px; padding: 0 6px;
+    font-size: 11px; line-height: 17px; vertical-align: 1px;
+    color: var(--err-fg); background: var(--err-bg);
+    border: 1px solid var(--err-border); border-radius: 999px;
+    white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -267,6 +310,11 @@ SHELL = r"""<!DOCTYPE html>
   <div id="filebox">
     <span id="file-name">未打开文件</span>
     <span id="file-dir"></span>
+    <!-- 打不开文件时换成这一格显示：位置、高度都和文件名/路径一样，正文不会被挤动 -->
+    <span id="file-error" hidden>
+      <span id="file-error-text"></span>
+      <button id="file-error-close" type="button" onclick="mdview.dismissBanner()" title="关闭提示" aria-label="关闭提示">✕</button>
+    </span>
   </div>
   <div class="group">
     <button class="icon" onclick="mdview.zoom(-10)" title="缩小 (Ctrl+-)">−</button>
@@ -330,6 +378,7 @@ window.mdview = (function () {
 
   function setDocument(d, keepScroll) {
     const scroller = $("scroll");
+    hideBanner();
     // 先按比例记住当前位置，替换内容后再换算回去，这样刷新不会跳回顶部
     const span = scroller.scrollHeight - scroller.clientHeight;
     const ratio = span > 0 ? scroller.scrollTop / span : 0;
@@ -343,6 +392,60 @@ window.mdview = (function () {
     scroller.scrollTop = keepScroll && newSpan > 0 ? ratio * newSpan : 0;
   }
 
+  // 打不开文件时的提示，占用的正是文件名/路径那一格：工具栏高度不变，正文区域不会
+  // 被顶得跳一下。autoClose 只在提示由用户当场操作触发时才为 true——启动时加载失败的
+  // 提示要一直留着，否则用户只看到一个空窗口，说不清文件为什么没打开。
+  const BANNER_TIMEOUT = 6000;
+  let bannerTimer = 0;
+
+  function hideBanner() {
+    if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = 0; }
+    const box = $("file-error");
+    if (box) { box.hidden = true; }
+    const name = $("file-name"), dir = $("file-dir");
+    if (name) { name.hidden = false; }
+    if (dir) { dir.hidden = false; }
+  }
+
+  function showBanner(text, autoClose) {
+    const box = $("file-error"), label = $("file-error-text");
+    if (!box || !label) { return; }
+    label.textContent = text;
+    label.title = text;   // 长路径会被省略号截掉，悬停能看全
+    box.hidden = false;
+    $("file-name").hidden = true;
+    $("file-dir").hidden = true;
+    if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = 0; }
+    if (autoClose) { bannerTimer = setTimeout(hideBanner, BANNER_TIMEOUT); }
+  }
+
+  // 前后翻历史时每一页都是现从硬盘读的，读不到就不能留着上一页的内容：
+  // 留在屏幕上会被当成「这页的内容」，实际那是另一个文件。
+  function showErrorPage(d) {
+    hideBanner();
+    const doc = $("doc");
+    doc.textContent = "";
+    const box = document.createElement("div");
+    box.className = "load-error";
+    const heading = document.createElement("h1");
+    heading.textContent = "打不开这个文件";
+    const reason = document.createElement("p");
+    reason.textContent = d.message || "原因不明";
+    const target = document.createElement("p");
+    target.className = "load-error-path";
+    target.textContent = d.path || "";
+    const hint = document.createElement("p");
+    hint.className = "load-error-hint";
+    hint.textContent = "文件可能已被删除、改名或移动。恢复后按 F5 重新读取，也可以用前进/后退去看别的文件。";
+    box.append(heading, reason, target, hint);
+    doc.appendChild(box);
+    $("file-name").textContent = d.title || "打不开的文件";
+    $("file-dir").textContent = d.dir || "";
+    $("file-dir").title = d.dir || "";
+    document.title = (d.title || "mdview") + " — mdview";
+    $("scroll").scrollTop = 0;
+  }
+
   function setRecent(items) {
     state.recent = items || [];
     const box = $("recent-box"), list = $("recent-list");
@@ -351,17 +454,29 @@ window.mdview = (function () {
     list.textContent = "";
     if (!items || !items.length) { box.hidden = true; return; }
     box.hidden = false;
-    items.forEach((path) => {
+    items.forEach((item) => {
+      // 正常情况下传进来的是 {path, exists}；纯字符串也照收，省得调用方挑格式
+      const path = typeof item === "string" ? item : item.path;
+      const exists = typeof item === "string" ? true : item.exists !== false;
       const li = document.createElement("li");
       const a = document.createElement("a");
       a.href = "#"; a.textContent = path; a.title = path;
       a.onclick = (e) => { e.preventDefault(); mdview.openRecent(path); };
       li.appendChild(a);
+      if (!exists) {
+        // 不删掉这条：路径本身就是线索（文件多半只是被挪走了），点开时会有横幅说明原因
+        li.classList.add("missing");
+        const tag = document.createElement("span");
+        tag.className = "recent-tag";
+        tag.textContent = "已失效";
+        li.appendChild(tag);
+      }
       list.appendChild(li);
     });
   }
 
   function showWelcome(items) {
+    hideBanner();
     $("doc").innerHTML = WELCOME_HTML;
     $("file-name").textContent = "未打开文件";
     $("file-dir").textContent = "";
@@ -388,7 +503,10 @@ window.mdview = (function () {
       setRecent(cfg.recent);
       return bridge.initial_document();
     }).then((doc) => {
-      if (doc) { setDocument(doc); }
+      // 启动参数指向的文件打不开时，后端只能把原因塞在返回值里（带返回值的方法里
+      // 不能反过来推脚本给页面），所以这里自己把提示条亮起来，并且不自动关闭
+      if (doc && doc.error) { showBanner(doc.error, false); }
+      else if (doc) { setDocument(doc); }
       return bridge.nav_state();
     }).then((nav) => { if (nav) { setNav(nav[0], nav[1]); } })
       .catch((err) => { console.error(err); });
@@ -473,7 +591,9 @@ window.mdview = (function () {
     back() { const b = api(); if (b) { b.go_back(); } },
     forward() { const b = api(); if (b) { b.go_forward(); } },
     home() { const b = api(); if (b) { b.go_home(); } },
+    dismissBanner() { hideBanner(); },
     setDocument, setRecent, setNav, showWelcome, applyTheme, applyZoom,
+    showBanner, hideBanner, showErrorPage,
   };
 })();
 </script>
@@ -512,9 +632,19 @@ class Api:
         # 历史栈里的 None 代表主页
         self._history: list[Path | None] = [None]
         self._index = 0
-        # 启动时先剔掉已经不存在的最近项，免得列表里留点不开的死链
-        self._config["recent"] = [
-            p for p in self._config["recent"] if Path(p).is_file()
+        # 最近列表里已经不存在的条目照样留着：那个路径对用户仍是线索（文件可能只是
+        # 被挪走了），列表里给它标一个「已失效」比默默删掉更容易理解
+        self._config["recent"] = [str(p) for p in self._config["recent"]]
+
+    def _recent_items(self) -> list[dict]:
+        """最近列表的推送格式：路径 + 当前还在不在。
+
+        存在与否每次现算，列表每次推送前都是最新的。存储格式仍是纯字符串列表，
+        免得给配置文件加没必要的结构。
+        """
+        return [
+            {"path": entry, "exists": Path(entry).is_file()}
+            for entry in self._config["recent"]
         ]
 
     # -- 内部工具 ---------------------------------------------------------- #
@@ -579,18 +709,83 @@ class Api:
             "dir": str(path.parent),
         }
 
+    # -- 打不开文件时的反馈 ------------------------------------------------- #
+    def _banner(self, message: str, auto_close: bool = True) -> None:
+        """在工具栏下面亮一条提示。
+
+        auto_close 只在提示由用户当场操作触发时才为真；启动时加载失败的提示要留着，
+        否则用户只看到一个空窗口，不知道文件为什么没打开。
+        """
+        self._push(
+            f"window.mdview.showBanner({core.to_js(message)}, "
+            f"{'true' if auto_close else 'false'});"
+        )
+
+    @staticmethod
+    def _load_problem(path: Path) -> str | None:
+        """返回不能按文件打开的原因，能打开就返回 None。"""
+        if path.is_dir():
+            return "这是一个文件夹，不是文件"
+        if not path.is_file():
+            return "找不到文件"
+        return None
+
+    @staticmethod
+    def _report_failure(problem: str, path: Path) -> str:
+        """打不开文件时写一行 stderr，并返回给界面用的那句话。
+
+        界面这半边不能省：开始菜单快捷方式走 pythonw，没有控制台可写，
+        只留日志等于什么也没说。
+        """
+        message = f"{problem}：{path}"
+        print(message, file=sys.stderr)
+        return message
+
+    def _show_error_page(self, path: Path, problem: str) -> None:
+        """历史里的文件没了时改显示错误页。
+
+        前后翻页每次都是现从硬盘读，没有缓存，所以读不到就不能把上一页的内容留在
+        屏幕上——那看上去就是「这一页的内容」，实际却是另一个文件。
+        """
+        self._current = path  # 留着路径：文件回来了按 F5 就能直接重读
+        self._set_title(path)
+        payload = {
+            "path": str(path),
+            "title": path.name,
+            "dir": str(path.parent),
+            "message": problem,
+        }
+        self._push(f"window.mdview.showErrorPage({core.to_js(payload)});")
+
     # -- 加载 -------------------------------------------------------------- #
     def load_path(
-        self, path: Path, keep_scroll: bool = False, record_history: bool = True
+        self,
+        path: Path,
+        keep_scroll: bool = False,
+        record_history: bool = True,
+        page_on_error: bool = False,
     ) -> bool:
+        """加载一个文件。
+
+        page_on_error=True 用于前后翻历史：读不到就整页换成错误页。其余入口
+        （打开文件、刷新、拖放、最近列表）都保留当前内容，只在顶部亮一条提示，
+        免得用户正在看的文档被一次失手点掉的路径顶掉。
+        """
         path = Path(path).expanduser().resolve()
-        if not path.is_file():
-            print(f"找不到文件：{path}", file=sys.stderr)
-            return False
-        try:
-            document = self._document(path)
-        except OSError as exc:
-            print(f"读取失败：{exc}", file=sys.stderr)
+        document: dict | None = None
+        problem = self._load_problem(path)
+        if problem is None:
+            try:
+                document = self._document(path)
+            except OSError as exc:
+                problem = f"读取失败：{exc}"
+        if document is None:
+            assert problem is not None
+            message = self._report_failure(problem, path)
+            if page_on_error:
+                self._show_error_page(path, problem)
+            else:
+                self._banner(message)
             return False
 
         self._push(
@@ -610,7 +805,7 @@ class Api:
         return {
             "theme": self._config["theme"],
             "zoom": self._config["zoom"],
-            "recent": self._config["recent"],
+            "recent": self._recent_items(),
         }
 
     def nav_state(self) -> list[bool]:
@@ -622,12 +817,26 @@ class Api:
         return [self._index > 0, self._index < len(self._history) - 1]
 
     def initial_document(self) -> dict | None:
-        if self._initial is None or not self._initial.is_file():
+        """启动时要显示的内容。
+
+        这个方法带返回值，不能反过来推脚本给页面（会打断返回值回传），所以「文件没找到」
+        只能塞进返回值，让前端自己把提示条亮起来。
+
+        只有「压根没带启动参数」才返回 None；带了参数却打不开必须把原因说明白，
+        否则用户面对的就是一个空窗口，看不出文件到底打开没有。
+        """
+        if self._initial is None:
             return None
-        try:
-            document = self._document(self._initial)
-        except OSError:
-            return None
+        document: dict | None = None
+        problem = self._load_problem(self._initial)
+        if problem is None:
+            try:
+                document = self._document(self._initial)
+            except OSError as exc:
+                problem = f"读取失败：{exc}"
+        if document is None:
+            assert problem is not None
+            return {"error": self._report_failure(problem, self._initial)}
         self._current = self._initial
         self._set_title(self._initial)
         self._remember(self._initial)
@@ -669,9 +878,13 @@ class Api:
                 try:
                     os.startfile(target)  # noqa: S606  交给系统默认程序
                 except OSError as exc:
-                    print(f"打开文件失败：{exc}", file=sys.stderr)
+                    message = f"打开文件失败：{exc}"
+                    print(message, file=sys.stderr)
+                    self._banner(message)
             else:
-                print(f"链接指向的文件不存在：{target}", file=sys.stderr)
+                message = f"找不到文件：{target}"
+                print(message, file=sys.stderr)
+                self._banner(message)
             return
         if parsed.scheme in ("http", "https", "mailto"):
             webbrowser.open(url)
@@ -686,13 +899,11 @@ class Api:
     def _reload_recent(self) -> None:
         """进主页时重读最近列表。
 
-        同时开着两个实例是常态，所以每次都从磁盘取最新的；顺手剔掉已经不存在的路径，
-        免得列表里留下点不开的死项。
+        同时开着两个实例是常态，所以每次都从磁盘取最新的。已经不存在的条目不再剔除，
+        列表里会标成「已失效」，点开时再给一条横幅。
         """
         stored = load_config()
-        self._config["recent"] = [
-            p for p in stored.get("recent", []) if Path(p).is_file()
-        ]
+        self._config["recent"] = [str(p) for p in stored.get("recent", [])]
         self._config["last_dir"] = stored.get("last_dir") or self._config.get("last_dir", "")
 
     def _show_entry(self) -> None:
@@ -702,10 +913,10 @@ class Api:
             self._set_title(None)
             self._reload_recent()
             self._push(
-                f"window.mdview.showWelcome({core.to_js(self._config['recent'])});"
+                f"window.mdview.showWelcome({core.to_js(self._recent_items())});"
             )
         else:
-            self.load_path(entry, record_history=False)
+            self.load_path(entry, record_history=False, page_on_error=True)
         self._push_nav()
 
     def go_back(self) -> None:
@@ -732,7 +943,10 @@ class Api:
 
         try:
             source = core.read_markdown(self._current)
-        except OSError:
+        except OSError as exc:
+            message = f"读取失败：{exc}"
+            print(message, file=sys.stderr)
+            self._banner(message)
             return
         html = cli.build_page(
             source,
